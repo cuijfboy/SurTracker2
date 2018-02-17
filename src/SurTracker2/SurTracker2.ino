@@ -21,6 +21,8 @@ Serial2 : GSP MODULE
 #define LED_2	PC6
 #define LED_3	PC8
 
+#define SERIAL_BR	9600
+
 #define LCD_CLK	PB13
 #define LCD_DAT	PB15
 #define LCD_CS	PB12
@@ -61,11 +63,16 @@ Serial2 : GSP MODULE
 #define GPS_EN  PA1
 #define GPS_TX	PA2
 #define GPS_RX	PA3
+#define GPS_SERAIL_BR	9600
 
 #define SD_CS 	PA4
 #define SD_SCK	PA5
 #define SD_MISO	PA6
 #define SD_MOSI	PA7
+
+#define CH_H	10
+#define CH_W	6
+#define LAT_LON_SCALE	10000000
 
 uint8 sw0, sw1;
 
@@ -79,15 +86,18 @@ char KEYPAD_KEYS[KEYPAD_ROW_CNT][KEYPAD_COL_CNT] = {
 };
 Keypad keypad = Keypad(makeKeymap(KEYPAD_KEYS), KEYPAD_ROW_PINS, KEYPAD_COL_PINS, KEYPAD_ROW_CNT, KEYPAD_COL_CNT);
 
-U8G2_ST7920_128X64_1_SW_SPI u8g2(U8G2_R0, LCD_CLK, LCD_DAT, LCD_CS, LCD_RST);
+U8G2_ST7920_128X64_F_SW_SPI u8g2(U8G2_R0, LCD_CLK, LCD_DAT, LCD_CS, LCD_RST);
 
 NMEAGPS  gps;
 gps_fix  fix;
 
+char str[32], dir;
+int32 value;
 
 //-----------------------------------------------------------------------------
 
 void setup() {
+
 	// init led pins
 	pinMode(LED_0, OUTPUT);
 	pinMode(LED_1, OUTPUT);
@@ -100,9 +110,26 @@ void setup() {
 	digitalWrite(LED_2, LOW); 
 	digitalWrite(LED_3, LOW); 
 
-	// --------------------------------
-
+	// step 1
 	digitalWrite(LED_0, HIGH); 
+
+	Serial.begin(SERIAL_BR);
+	if (Serial) {
+		Serial.print("Serial initialized: ");
+		Serial.print(SERIAL_BR);
+		Serial.println("bps");
+	}
+
+	u8g2.begin();
+	if (Serial) {
+		Serial.println("LCD initialized");
+	}
+
+	u8g2.clearBuffer();
+	u8g2.setFont(u8g2_font_profont11_mf);
+	u8g2.drawStr(0, CH_H * 1, "--- Sur Tracker 2 ---");
+	u8g2.drawStr(0, CH_H * 2, "Serial init........OK");
+	u8g2.sendBuffer();
 
 	// init sw pins
 	pinMode(SW_0, INPUT);
@@ -112,61 +139,112 @@ void setup() {
 	sw0 = digitalRead(SW_0);
 	sw1 = digitalRead(SW_1);
 
-	// init gps module pins
-	pinMode(GPS_EN, OUTPUT);
-	// enable gps module
-	digitalWrite(GPS_EN, HIGH); 
-
-	Serial.begin(9600);
-	while (!Serial) {
-		;
+	if (Serial) {
+		Serial.print("Switch initialized: sw0 = ");
+		Serial.print(sw0);
+		Serial.print(", sw1 = ");
+		Serial.println(sw1);
 	}
-	Serial.print( F("NMEAsimple.INO: started\n") );
+	u8g2.drawStr(0, CH_H * 3, "Switch init........OK");
+	u8g2.sendBuffer();
 
-	gpsPort.begin(9600);
-
-	// Serial.print("Initializing SD card...");
-
-	// // see if the card is present and can be initialized:
-	// if (!SD.begin(SD_CS)) {
-	// 	Serial.println("Card failed, or not present");
-	// 	// don't do anything more:
-	// 	while (1);
-	// }
-	// Serial.println("card initialized.");
-
-	// // open the file. note that only one file can be open at a time,
-	// // so you have to close this one before opening another.
-	// File dataFile = SD.open("datalog.txt");
-
-	// // if the file is available, write to it:
-	// if (dataFile) {
-	// 	while (dataFile.available()) {
-	// 		Serial.write(dataFile.read());
-	// 	}
-	// 	dataFile.close();
-	// }
-	// // if the file isn't open, pop up an error:
-	// else {
-	// 	Serial.println("error opening datalog.txt");
-	// }
-
-	u8g2.begin();
-	
-	// --------------------------------
-	digitalWrite(LED_0, HIGH); 
-	delay(333);
+	// step 2
 	digitalWrite(LED_1, HIGH); 
-	delay(333);
+
+	// init gps module enable pin
+	pinMode(GPS_EN, OUTPUT);
+	if (Serial) {
+		Serial.println("GPS_EN pin initialized");
+	}
+
+	// init gps module serial port
+	gpsPort.begin(GPS_SERAIL_BR);
+	while (!gpsPort);
+	if (Serial) {
+		Serial.print("GSP serial port initialized: ");
+		Serial.print(GPS_SERAIL_BR);
+		Serial.println("bps");
+	}
+	u8g2.drawStr(0, CH_H * 4, "GPS init...........OK");
+	u8g2.sendBuffer();
+
+	// step 3
 	digitalWrite(LED_2, HIGH); 
-	delay(333);
-	digitalWrite(LED_3, HIGH); 
-	delay(1000);
+
+	// init sd card
+	if (Serial) {
+		Serial.print("SDCard init... ");
+	}
+	u8g2.drawStr(0, CH_H * 5, "SDCard init........");
+ 	if (!SD.begin(SD_CS)) {
+ 		if (Serial) {
+ 			Serial.println("Failed, or not present");
+		}
+ 		u8g2.drawStr(CH_W * 17, CH_H * 5, "FAIL");
+	} else {
+		if (Serial) {
+			Serial.println("OK");
+		}
+		u8g2.drawStr(CH_W * 19, CH_H * 5, "OK");
+	}
+	u8g2.sendBuffer();
+
+ 	// step 4
+	digitalWrite(LED_3, HIGH);
+
+	// --------------------------------
+
+	delay(1000 * 3);
+
 	// turn off all leds
 	digitalWrite(LED_0, LOW); 
 	digitalWrite(LED_1, LOW); 
 	digitalWrite(LED_2, LOW); 
 	digitalWrite(LED_3, LOW); 
+
+	// init ui
+	u8g2.clearBuffer();
+	u8g2.setFont(u8g2_font_profont11_mf);
+
+	// speed
+	u8g2.setFont(u8g2_font_profont17_mf);
+	u8g2.drawStr(4, 16, "--.--");
+	u8g2.setFont(u8g2_font_profont11_mf);
+	u8g2.drawStr(CH_W * 1, CH_H * 3, "km/h");
+	
+	// latitude
+	u8g2.drawStr(CH_W * 9, CH_H * 1, "---.---- LAT");
+	
+	// longitude
+	u8g2.drawStr(CH_W * 9, CH_H * 2, "---.---- LON");
+	
+	// altitude
+	u8g2.drawStr(CH_W * 14, CH_H * 3, "--- ALT");
+
+	// heading
+	u8g2.drawStr(CH_W * 6, CH_H * 3, "--- HD");
+
+	// satellites
+	u8g2.drawStr(CH_W * 0, CH_H * 4, "*00");
+
+	// date
+	u8g2.drawStr(CH_W * 4, CH_H * 4, "YY-MM-DD");
+
+	// time
+	u8g2.drawStr(CH_W * 13, CH_H * 4, "hh:mm:ss");
+
+	// refresh ui
+	u8g2.sendBuffer();
+	if (Serial) {
+		Serial.println("UI inited");
+	}
+
+	// enable gps module
+	digitalWrite(GPS_EN, HIGH); 
+	if (Serial) {
+		Serial.println("Enable GPS module");
+	}
+	
 }
 
 //-----------------------------------------------------------------------------
@@ -178,31 +256,140 @@ void loop() {
 	digitalWrite(LED_2, sw1 ? HIGH : LOW); 
 
 	char key = keypad.getKey();
-	if (key){
-		Serial.println(key);
+	if (key) {
+		if (Serial) {
+			Serial.println(key);
+		}
 	}
 
-	u8g2.firstPage();
-	do {
-		u8g2.setFont(u8g2_font_profont11_mf  );
-		u8g2.drawStr(0,20,"Hello World!");
-		u8g2.drawStr(0,48,"012345678901234567890");
-	} while (u8g2.nextPage());
-
-	while (gps.available( gpsPort )) {
+	while (gps.available(gpsPort)) {
 		fix = gps.read();
 
-		DEBUG_PORT.print( F("Location: ") );
-		if (fix.valid.location) {
-			DEBUG_PORT.print( fix.latitude(), 6 );
-			DEBUG_PORT.print( ',' );
-			DEBUG_PORT.print( fix.longitude(), 6 );
+		if (1) {
+			if (Serial) {
+				Serial.print("Satellites: ");
+				Serial.println(fix.satellites);
+			}
+			sprintf(str, "%2d*", fix.satellites);
+			str[3] = 0;
+			u8g2.drawStr(CH_W * 0, CH_H * 4, str);
 		}
 
-		DEBUG_PORT.print( F(", Altitude: ") );
-		if (fix.valid.altitude)
-			DEBUG_PORT.print( fix.altitude() );
+		if (fix.valid.date) {
+			if (Serial) {
+				Serial.print("Date: ");
+				Serial.print(fix.dateTime.year);
+				Serial.print("-");
+				Serial.print(fix.dateTime.month);
+				Serial.print("-");
+				Serial.println(fix.dateTime.date);
+			}
+			sprintf(str, "%02d-%02d-%02d", fix.dateTime.year, fix.dateTime.month, fix.dateTime.date);
+			str[8] = 0;
+			u8g2.drawStr(CH_W * 4, CH_H * 4, str);
+		} else {
+			u8g2.drawStr(CH_W * 4, CH_H * 4, "YY-MM-DD");
+		}
 
-		DEBUG_PORT.println();
+		if (fix.valid.time) {
+			if (Serial) {
+				Serial.print("Time: ");
+				Serial.print(fix.dateTime.hours);
+				Serial.print(":");
+				Serial.print(fix.dateTime.minutes);
+				Serial.print(":");
+				Serial.println(fix.dateTime.seconds);
+			}
+			sprintf(str, "%02d:%02d:%02d", fix.dateTime.hours, fix.dateTime.minutes, fix.dateTime.seconds);
+			str[8] = 0;
+			u8g2.drawStr(CH_W * 13, CH_H * 4, str);
+		} else {
+			u8g2.drawStr(CH_W * 13, CH_H * 4, "hh:mm:ss");
+		}
+
+		if (fix.valid.location) {
+			if (Serial) {
+				Serial.print("Latitude: ");
+				Serial.print(fix.latitude());
+				Serial.print(", ");
+				Serial.println(fix.latitudeL());
+				Serial.print("Longitude: ");
+				Serial.print(fix.longitude());
+				Serial.print(", ");
+				Serial.println(fix.longitudeL());
+			}
+
+			value = fix.latitudeL();
+			dir = value < 0 ? 'S' : 'N';
+			value = value < 0 ? (-1 * value) : value;
+			sprintf(str, "%3d.%07d%c", value / LAT_LON_SCALE, value % LAT_LON_SCALE, dir);
+			str[12] = 0;
+			u8g2.drawStr(CH_W * 9, CH_H * 1, str);
+			
+			value = fix.longitudeL();
+			dir = value < 0 ? 'W' : 'E';
+			value = value < 0 ? (-1 * value) : value;
+			sprintf(str, "%3d.%07d%c", value / LAT_LON_SCALE, value % LAT_LON_SCALE, dir);
+			str[12] = 0;
+			u8g2.drawStr(CH_W * 9, CH_H * 2, str);
+		} else {
+			u8g2.drawStr(CH_W * 9, CH_H * 1, "---.---- LAT");
+			u8g2.drawStr(CH_W * 9, CH_H * 2, "---.---- LON");
+		}
+
+		if (fix.valid.altitude) {
+			if (Serial) {
+				Serial.print("Altitude: ");
+				Serial.print(fix.altitude());
+				Serial.print(", ");
+				Serial.println(fix.altitude_cm());
+			}
+			value = fix.altitude_cm();
+			sprintf(str, "%3d.%02dm", value / 100, value % 100);
+			str[7] = 0;
+			u8g2.drawStr(CH_W * 14, CH_H * 3, str);
+			Serial.println(str);
+		} else {
+			u8g2.drawStr(CH_W * 14, CH_H * 3, "--- ALT");
+		}
+
+		if (fix.valid.heading) {
+			if (Serial) {
+				Serial.print("Heading: ");
+				Serial.print(fix.heading());
+				Serial.print(", ");
+				Serial.println(fix.heading_cd());
+			}
+			value = fix.heading_cd();
+			sprintf(str, "%3d.%02d\xb0", value / 100, value % 100);
+			str[7] = 0;
+			u8g2.drawStr(CH_W * 6, CH_H * 3, str);
+			Serial.println(str);
+		} else {
+			u8g2.drawStr(CH_W * 6, CH_H * 3, "--- HD");
+		}
+
+		if (fix.valid.speed) {
+			if (Serial) {
+				Serial.print("Speed: ");
+				Serial.println(fix.speed_kph());
+			}
+			value = fix.speed_kph() * 100;
+			sprintf(str, "%2d.%02d", value / 100, value % 100);
+			str[5] = 0;
+			u8g2.setFont(u8g2_font_profont17_mf);
+			u8g2.drawStr(4, 16, str);
+			u8g2.setFont(u8g2_font_profont11_mf);
+		} else {
+			u8g2.setFont(u8g2_font_profont17_mf);
+			u8g2.drawStr(4, 16, "--.--");
+			u8g2.setFont(u8g2_font_profont11_mf);
+		}
+
+		u8g2.sendBuffer();
+		if (Serial) {
+			Serial.println("UI refreshed");
+			Serial.println("-");
+		}
 	}
 }
