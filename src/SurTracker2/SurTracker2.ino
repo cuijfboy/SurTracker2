@@ -348,7 +348,6 @@ void loop() {
 			sprintf(str, "%3d.%02dm", value / 100, value % 100);
 			str[7] = 0;
 			u8g2.drawStr(CH_W * 14, CH_H * 3, str);
-			Serial.println(str);
 		} else {
 			u8g2.drawStr(CH_W * 14, CH_H * 3, "--- ALT");
 		}
@@ -364,7 +363,6 @@ void loop() {
 			sprintf(str, "%3d.%02d\xb0", value / 100, value % 100);
 			str[7] = 0;
 			u8g2.drawStr(CH_W * 6, CH_H * 3, str);
-			Serial.println(str);
 		} else {
 			u8g2.drawStr(CH_W * 6, CH_H * 3, "--- HD");
 		}
