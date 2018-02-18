@@ -15,6 +15,7 @@ Serial2 : GSP MODULE
 #include <SD.h>
 #include <NMEAGPS.h>
 #include <GPSport.h>
+#include <GPX.h>
 
 #define LED_0	PC7
 #define LED_1	PC9
@@ -74,8 +75,6 @@ Serial2 : GSP MODULE
 #define CH_W	6
 #define LAT_LON_SCALE	10000000
 
-uint8 sw0, sw1;
-
 uint8 KEYPAD_ROW_PINS[KEYPAD_ROW_CNT] = {KEYPAD_ROW_0, KEYPAD_ROW_1, KEYPAD_ROW_2, KEYPAD_ROW_3};
 uint8 KEYPAD_COL_PINS[KEYPAD_COL_CNT] = {KEYPAD_COL_0, KEYPAD_COL_1, KEYPAD_COL_2, KEYPAD_COL_3};
 char KEYPAD_KEYS[KEYPAD_ROW_CNT][KEYPAD_COL_CNT] = {
@@ -90,9 +89,14 @@ U8G2_ST7920_128X64_F_SW_SPI u8g2(U8G2_R0, LCD_CLK, LCD_DAT, LCD_CS, LCD_RST);
 
 NMEAGPS  gps;
 gps_fix  fix;
+GPX gpx;
 
 char str[32], dir;
 int32 value;
+
+uint8 sw0, sw1, lock, rec;
+File file;
+char name[12];
 
 //-----------------------------------------------------------------------------
 
@@ -244,16 +248,56 @@ void setup() {
 	if (Serial) {
 		Serial.println("Enable GPS module");
 	}
+
+	gpx.setMetaDesc("SurTracker2 GPX");
+	gpx.setName("SurTracker2 Track Name");
+	gpx.setDesc("SurTracker2 Track Desc");
+	gpx.setSrc("SurTracker2 Track Src");
 	
+	if (Serial) {
+		Serial.println(gpx.getOpen());
+		Serial.println(gpx.getMetaData());
+		Serial.println(gpx.getTrakOpen());
+		Serial.println(gpx.getInfo());
+		Serial.println(gpx.getTrakSegOpen());
+	}
+
 }
 
 //-----------------------------------------------------------------------------
 
 void loop() {
 	sw0 = digitalRead(SW_0);
-	digitalWrite(LED_1, sw0 ? HIGH : LOW); 
+	digitalWrite(LED_0, sw0 ? HIGH : LOW); 
 	sw1 = digitalRead(SW_1);
-	digitalWrite(LED_2, sw1 ? HIGH : LOW); 
+	digitalWrite(LED_1, sw1 ? HIGH : LOW); 
+
+	if (lock != sw0) {
+		lock = sw0;
+		if (lock == HIGH) {
+			u8g2.drawStr(0, CH_H * 6, "LOCK");
+		} else {
+			u8g2.drawStr(0, CH_H * 6, "    ");
+		}
+	}
+
+	if (rec != sw1) {
+		rec = sw1;
+		memset(name, 0, sizeof(name));
+		if (rec == HIGH) {
+			u8g2.drawStr(CH_W * 5, CH_H * 6, "REC");
+		} else {
+			u8g2.drawStr(CH_W * 5, CH_H * 6, "   ");
+			if (file) {
+				file.println(gpx.getTrakSegClose());
+				file.println(gpx.getTrakClose());
+				file.println(gpx.getClose());
+				file.flush();
+				file.close();		
+			}
+			
+		}
+	}
 
 	char key = keypad.getKey();
 	if (key) {
@@ -264,6 +308,8 @@ void loop() {
 
 	while (gps.available(gpsPort)) {
 		fix = gps.read();
+
+		digitalWrite(LED_2, HIGH);
 
 		if (1) {
 			if (Serial) {
@@ -332,6 +378,30 @@ void loop() {
 			sprintf(str, "%3d.%07d%c", value / LAT_LON_SCALE, value % LAT_LON_SCALE, dir);
 			str[12] = 0;
 			u8g2.drawStr(CH_W * 9, CH_H * 2, str);
+
+			if (file) {
+				digitalWrite(LED_3, HIGH);
+
+				int32 lat_val, lon_val;
+				char lat_str[13], lon_str[13];
+
+				lat_val = fix.latitudeL();
+				sprintf(lat_str, "%d.%07d", (lat_val / LAT_LON_SCALE), (lat_val < 0 ? (-1 * lat_val) : lat_val) % LAT_LON_SCALE);
+				lat_str[12] = 0;
+
+				lon_val = fix.longitudeL();
+				sprintf(lon_str, "%d.%07d", (lon_val / LAT_LON_SCALE), (lon_val < 0 ? (-1 * lon_val) : lon_val) % LAT_LON_SCALE);
+				lon_str[12] = 0;
+
+				String loc_str = gpx.getPt(GPX_TRKPT, String(lon_str), String(lat_str));
+				file.println(loc_str);
+				file.flush();
+				if (Serial) {
+					Serial.println(loc_str);
+				}
+
+				digitalWrite(LED_3, LOW);
+			}
 		} else {
 			u8g2.drawStr(CH_W * 9, CH_H * 1, "---.---- LAT");
 			u8g2.drawStr(CH_W * 9, CH_H * 2, "---.---- LON");
@@ -389,5 +459,24 @@ void loop() {
 			Serial.println("UI refreshed");
 			Serial.println("-");
 		}
+
+		if (rec == HIGH) {
+			if (name[0] == 0 && fix.valid.date && fix.valid.time) {
+				sprintf(name, "%02d%02d%02d.gpx", 
+					fix.dateTime.hours, fix.dateTime.minutes, fix.dateTime.seconds);
+				Serial.println(name);
+				file = SD.open(name, FILE_WRITE);
+				if (file) {
+					file.println(gpx.getOpen());
+					file.println(gpx.getMetaData());
+					file.println(gpx.getTrakOpen());
+					file.println(gpx.getInfo());
+					file.println(gpx.getTrakSegOpen());
+					file.flush();
+				}
+			}
+		}
+
+		digitalWrite(LED_2, LOW);
 	}
 }
