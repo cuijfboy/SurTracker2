@@ -16,6 +16,8 @@ Serial2 : GSP MODULE
 #include <NMEAGPS.h>
 #include <GPSport.h>
 #include <GPX.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BMP280.h>
 
 #define LED_0	PC7
 #define LED_1	PC9
@@ -64,7 +66,7 @@ Serial2 : GSP MODULE
 #define GPS_EN  PA1
 #define GPS_TX	PA2
 #define GPS_RX	PA3
-#define GPS_SERAIL_BR	9600
+#define GPS_SERAIL_BR	38400
 
 #define SD_CS 	PA4
 #define SD_SCK	PA5
@@ -97,6 +99,9 @@ int32 value;
 uint8 sw0, sw1, lock, rec;
 File file;
 char name[12];
+
+Adafruit_BMP280 baro;
+uint8  baro_ready;
 
 //-----------------------------------------------------------------------------
 
@@ -152,9 +157,6 @@ void setup() {
 	u8g2.drawStr(0, CH_H * 3, "Switch init........OK");
 	u8g2.sendBuffer();
 
-	// step 2
-	digitalWrite(LED_1, HIGH); 
-
 	// init gps module enable pin
 	pinMode(GPS_EN, OUTPUT);
 	if (Serial) {
@@ -172,8 +174,8 @@ void setup() {
 	u8g2.drawStr(0, CH_H * 4, "GPS init...........OK");
 	u8g2.sendBuffer();
 
-	// step 3
-	digitalWrite(LED_2, HIGH); 
+	// step 2
+	digitalWrite(LED_1, HIGH); 
 
 	// init sd card
 	if (Serial) {
@@ -190,6 +192,28 @@ void setup() {
 			Serial.println("OK");
 		}
 		u8g2.drawStr(CH_W * 19, CH_H * 5, "OK");
+	}
+	u8g2.sendBuffer();
+
+	// step 3
+	digitalWrite(LED_2, HIGH); 
+
+	// init barometer module
+	if (Serial) {
+		Serial.print("Barometer init... ");
+	}
+	u8g2.drawStr(0, CH_H * 6, "Barometer init.....");
+	baro_ready = baro.begin();
+	if (!baro_ready) {
+		if (Serial) {
+ 			Serial.println("Could not find a valid BMP280 sensor, check wiring!");
+		}
+		u8g2.drawStr(CH_W * 17, CH_H * 6, "FAIL");
+	} else {
+		if (Serial) {
+			Serial.println("OK");
+		}
+		u8g2.drawStr(CH_W * 19, CH_H * 6, "OK");
 	}
 	u8g2.sendBuffer();
 
@@ -226,16 +250,22 @@ void setup() {
 	u8g2.drawStr(CH_W * 14, CH_H * 3, "--- ALT");
 
 	// heading
-	u8g2.drawStr(CH_W * 6, CH_H * 3, "--- HD");
+	u8g2.drawStr(CH_W * 6, CH_H * 3, "---- HD");
 
 	// satellites
-	u8g2.drawStr(CH_W * 0, CH_H * 4, "*00");
+	u8g2.drawStr(CH_W * 0, CH_H * 4, " 0*");
 
 	// date
 	u8g2.drawStr(CH_W * 4, CH_H * 4, "YY-MM-DD");
 
 	// time
 	u8g2.drawStr(CH_W * 13, CH_H * 4, "hh:mm:ss");
+
+	// temperature
+	u8g2.drawStr(CH_W * 1, CH_H * 5, "---- \xb0\x43");
+	
+	// barometer
+	u8g2.drawStr(CH_W * 10, CH_H * 5, "-----.-- Pa");
 
 	// refresh ui
 	u8g2.sendBuffer();
@@ -268,9 +298,7 @@ void setup() {
 
 void loop() {
 	sw0 = digitalRead(SW_0);
-	digitalWrite(LED_0, sw0 ? HIGH : LOW); 
 	sw1 = digitalRead(SW_1);
-	digitalWrite(LED_1, sw1 ? HIGH : LOW); 
 
 	if (lock != sw0) {
 		lock = sw0;
@@ -309,7 +337,7 @@ void loop() {
 	while (gps.available(gpsPort)) {
 		fix = gps.read();
 
-		digitalWrite(LED_2, HIGH);
+		digitalWrite(LED_1, HIGH);
 
 		if (1) {
 			if (Serial) {
@@ -380,7 +408,7 @@ void loop() {
 			u8g2.drawStr(CH_W * 9, CH_H * 2, str);
 
 			if (file) {
-				digitalWrite(LED_3, HIGH);
+				digitalWrite(LED_2, HIGH);
 
 				int32 lat_val, lon_val;
 				char lat_str[13], lon_str[13];
@@ -400,7 +428,7 @@ void loop() {
 					Serial.println(loc_str);
 				}
 
-				digitalWrite(LED_3, LOW);
+				digitalWrite(LED_2, LOW);
 			}
 		} else {
 			u8g2.drawStr(CH_W * 9, CH_H * 1, "---.---- LAT");
@@ -434,7 +462,7 @@ void loop() {
 			str[7] = 0;
 			u8g2.drawStr(CH_W * 6, CH_H * 3, str);
 		} else {
-			u8g2.drawStr(CH_W * 6, CH_H * 3, "--- HD");
+			u8g2.drawStr(CH_W * 6, CH_H * 3, "---- HD");
 		}
 
 		if (fix.valid.speed) {
@@ -452,6 +480,21 @@ void loop() {
 			u8g2.setFont(u8g2_font_profont17_mf);
 			u8g2.drawStr(4, 16, "--.--");
 			u8g2.setFont(u8g2_font_profont11_mf);
+		}
+
+		if (baro_ready) {
+			value = baro.readTemperature() * 100;
+			sprintf(str, "%2d.%02d\xb0\x43", value / 100, value % 100);
+			str[8] = 0;
+			u8g2.drawStr(CH_W * 1, CH_H * 5, str);
+
+			value = baro.readPressure() * 100;
+			sprintf(str, "%6d.%02dPa", value / 100, value % 100);
+			str[11] = 0;
+			u8g2.drawStr(CH_W * 10, CH_H * 5, str);
+		} else {
+			u8g2.drawStr(CH_W * 1, CH_H * 5, "---- \xb0\x43");
+			u8g2.drawStr(CH_W * 10, CH_H * 5, "-----.-- Pa");
 		}
 
 		u8g2.sendBuffer();
@@ -477,6 +520,6 @@ void loop() {
 			}
 		}
 
-		digitalWrite(LED_2, LOW);
+		digitalWrite(LED_1, LOW);
 	}
 }
